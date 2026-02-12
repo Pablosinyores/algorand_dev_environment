@@ -105,20 +105,32 @@ git clone <repo-url>
 cd blockchain_dev_assessment/projects/blockchain_dev_assessment
 ```
 
-### 3. Start Algorand LocalNet
-
-LocalNet runs a private Algorand network inside Docker containers (algod, indexer, conduit).
+### 3. Install Python Dependencies
 
 ```bash
-algokit localnet start
-algokit localnet status   # verify it's running
+poetry install
 ```
 
-### 4. Generate the LocalNet Environment File
+This installs all dependencies into a local `.venv/` virtual environment:
+- `algorand-python` — Smart contract framework (Puya)
+- `algokit-utils` — Typed client & deployment utilities
+- `puyapy` — Compiler (Python to TEAL)
+- `algokit-client-generator` — Generates typed Python clients from ARC-56 specs
 
-This creates a `.env.localnet` file with the algod/indexer connection details for LocalNet.
+### 4. Network Environments
+
+This project supports two networks. Each has its own `.env` file that the scripts load automatically based on the `--network` flag.
+
+#### LocalNet (`.env.localnet`)
+
+LocalNet runs a private Algorand network inside Docker containers (algod, indexer, conduit). **No mnemonic is needed** — accounts are auto-created and funded via KMD.
 
 ```bash
+# Start LocalNet
+algokit localnet start
+algokit localnet status   # verify it's running
+
+# Generate the env file (one-time)
 algokit generate env-file -a target_network localnet
 ```
 
@@ -132,24 +144,52 @@ INDEXER_SERVER=http://localhost
 INDEXER_PORT=8980
 ```
 
-> The deploy script auto-loads this via `python-dotenv`. No manual edits needed for LocalNet.
+> No `DEPLOYER_MNEMONIC` is needed for LocalNet. When the SDK detects LocalNet, it automatically creates a wallet via KMD and funds it from the LocalNet dispenser.
 
-### 5. Install Python Dependencies
+#### Testnet (`.env.testnet`)
+
+Testnet is the public Algorand test network. You need a funded account with a mnemonic.
 
 ```bash
-poetry install
+# Generate the env file (one-time)
+algokit generate env-file -a target_network testnet
 ```
 
-This installs all dependencies into a local `.venv/` virtual environment:
-- `algorand-python` — Smart contract framework (Puya)
-- `algokit-utils` — Typed client & deployment utilities
-- `puyapy` — Compiler (Python to TEAL)
-- `algokit-client-generator` — Generates typed Python clients from ARC-56 specs
+Then edit `.env.testnet` to add your mnemonic (values **must be quoted** if they contain spaces):
+```
+ALGOD_SERVER=https://testnet-api.algonode.cloud
+INDEXER_SERVER=https://testnet-idx.algonode.cloud
+DEPLOYER_MNEMONIC="your twenty five word mnemonic here"
+```
 
-### 6. Build and Deploy
+Fund your account with free testnet ALGO at the [Algorand Testnet Dispenser](https://bank.testnet.algorand.network).
+
+> **Important:** Always quote the `DEPLOYER_MNEMONIC` value in `.env.testnet`. Without quotes, `source .env.testnet` will fail because the shell interprets each word as a separate command.
+
+#### How the Scripts Pick the Right Network
+
+- `call_hello.py` uses the `--network` flag (defaults to `localnet`). It **clears stale env vars** before loading the chosen `.env.<network>` file, so you can safely switch between networks without leftover variables causing issues.
+- `smart_contracts deploy` uses whichever env file `python-dotenv` finds (`.env`, `.env.localnet`). For testnet, source the env file first: `set -a && source .env.testnet && set +a`.
+
+### 5. Build the Contract
 
 ```bash
-# Build (compile contract + generate typed client) AND deploy in one step
+# Compile contract + generate typed client
+poetry run python -m smart_contracts build
+```
+
+### 6. Deploy
+
+#### Deploy to LocalNet
+
+Requires LocalNet running (`algokit localnet start`).
+
+```bash
+poetry run python -m smart_contracts deploy
+```
+
+Or build and deploy in one step:
+```bash
 poetry run python -m smart_contracts all
 ```
 
@@ -160,27 +200,42 @@ INFO: Called hello on HelloWorld (1002) with name=John Doe, received: Hello, Joh
 INFO: Called hello on HelloWorld (1002) with name=Algorand Developer, received: Hello, Algorand Developer
 ```
 
-You can also build and deploy separately:
+#### Deploy to Testnet
+
+Requires a configured and funded `.env.testnet` (see step 4 above).
+
 ```bash
-poetry run python -m smart_contracts build    # compile only
-poetry run python -m smart_contracts deploy   # deploy only (requires prior build)
+# Load testnet env vars into the shell, then deploy
+set -a && source .env.testnet && set +a
+poetry run python -m smart_contracts deploy
+```
+
+Expected output:
+```
+INFO: Deploying app hello_world
+INFO: Called hello on HelloWorld (755415376) with name=John Doe, received: Hello, John Doe
+INFO: Called hello on HelloWorld (755415376) with name=Algorand Developer, received: Hello, Algorand Developer
 ```
 
 ## Making Additional Transactions
 
-Use the standalone `call_hello.py` script to call the contract without re-deploying. Use the `--network` flag to choose between **localnet** (default) and **testnet**:
+Use the standalone `call_hello.py` script to call the contract without re-deploying. The `--network` flag controls which network and env file is used:
 
 ```bash
 # --- LocalNet (default) ---
+# Loads .env.localnet → uses KMD auto-funded account → connects to localhost:4001
 poetry run python call_hello.py                          # default name "John Doe"
 poetry run python call_hello.py "Alice"                  # custom name
 
 # --- Testnet ---
+# Loads .env.testnet → uses DEPLOYER_MNEMONIC → connects to testnet-api.algonode.cloud
 poetry run python call_hello.py --network testnet        # default name "John Doe"
 poetry run python call_hello.py --network testnet "Bob"  # custom name
 ```
 
 Each run creates a new on-chain app call transaction and updates the box `greeting` with `"Hello, <name>"`.
+
+> **No need to manually `source` env files.** The script clears stale env vars and loads the correct `.env.<network>` file automatically, so switching between localnet and testnet is safe even in the same terminal session.
 
 ## Testing
 
@@ -254,105 +309,27 @@ The contract has also been deployed to the public **Algorand Testnet**.
 - [View Application on Lora](https://lora.algokit.io/testnet/application/755415376)
 - [View Transactions on Lora](https://lora.algokit.io/testnet/application/755415376/transactions)
 
-### Deploying to Testnet Yourself
+### Verifying Transactions on Lora
 
-```bash
-# 1. Generate testnet env file
-algokit generate env-file -a target_network testnet
+After making a transaction on either network, inspect it on [Lora](https://lora.algokit.io/):
 
-# 2. Add your DEPLOYER_MNEMONIC to .env.testnet
+| What | LocalNet | Testnet |
+|---|---|---|
+| **Launch explorer** | `algokit localnet explore` | Visit [lora.algokit.io/testnet](https://lora.algokit.io/testnet) |
+| **View app** | Search by App ID in Lora | [Application 755415376](https://lora.algokit.io/testnet/application/755415376) |
+| **View transactions** | App page → "Transactions" tab | [Transactions](https://lora.algokit.io/testnet/application/755415376/transactions) |
+| **View box storage** | App page → "Boxes" tab | App page → "Boxes" tab |
 
-# 3. Fund your account at https://bank.testnet.algorand.network
+### How Transactions Work Under the Hood
 
-# 4. Deploy
-ALGOD_SERVER=https://testnet-api.algonode.cloud \
-DEPLOYER_MNEMONIC="your mnemonic here" \
-poetry run python -m smart_contracts deploy
-```
+Each transaction (LocalNet or Testnet) follows this flow:
 
-### Making Transactions on Testnet
-
-Once the contract is deployed to testnet, you can call its `hello` method to create on-chain transactions that update box storage.
-
-#### Prerequisites
-
-1. **`.env.testnet` must be configured** with your testnet algod endpoint and deployer mnemonic:
-   ```
-   ALGOD_SERVER=https://testnet-api.algonode.cloud
-   INDEXER_SERVER=https://testnet-idx.algonode.cloud
-   DEPLOYER_MNEMONIC=your twenty five word mnemonic here
-   ```
-
-2. **Your account must be funded** with testnet ALGO. Get free testnet ALGO from the [Algorand Testnet Dispenser](https://bank.testnet.algorand.network) by entering your account address.
-
-3. **The contract must already be deployed** to testnet (see "Deploying to Testnet Yourself" above). The deploy step also funds the app account with 1 ALGO for box storage MBR.
-
-#### Option 1: Using the Deploy Script
-
-The deploy script (`smart_contracts/hello_world/deploy_config.py`) automatically makes two app call transactions after deploying. To run it against testnet, load the testnet environment:
-
-```bash
-# Load testnet env vars and deploy + transact
-set -a && source .env.testnet && set +a
-poetry run python -m smart_contracts deploy
-```
-
-This will:
-- Find or create the HelloWorld app on testnet
-- Call `hello("John Doe")` → stores `"Hello, John Doe"` in box storage
-- Call `hello("Algorand Developer")` → overwrites box with `"Hello, Algorand Developer"`
-
-Expected output:
-```
-INFO: Called hello on HelloWorld (755415376) with name=John Doe, received: Hello, John Doe
-INFO: Called hello on HelloWorld (755415376) with name=Algorand Developer, received: Hello, Algorand Developer
-```
-
-#### Option 2: Using the Standalone `call_hello.py` Script
-
-The `call_hello.py` script lets you call the contract with any name without re-deploying. Just pass `--network testnet`:
-
-```bash
-# Call with default name ("John Doe")
-poetry run python call_hello.py --network testnet
-
-# Call with a custom name
-poetry run python call_hello.py --network testnet "Alice"
-poetry run python call_hello.py --network testnet "Satoshi"
-```
-
-The script automatically loads `.env.testnet` when `--network testnet` is specified — no need to manually source env files.
-
-Each run creates a new **application call transaction** on testnet and updates the `greeting` box with `"Hello, <name>"`.
-
-Expected output:
-```
-2025-01-01 12:00:00 INFO      : Using HelloWorld app ID: 755415376
-2025-01-01 12:00:02 INFO      : Transaction successful!
-2025-01-01 12:00:02 INFO      :   Name passed:     Alice
-2025-01-01 12:00:02 INFO      :   Return value:    Hello, Alice
-2025-01-01 12:00:02 INFO      :   App ID:          755415376
-2025-01-01 12:00:02 INFO      :   Box 'greeting' now contains: Hello, Alice
-```
-
-#### Verifying Transactions on Lora
-
-After making a transaction, you can verify it on the [Lora Block Explorer](https://lora.algokit.io/):
-
-1. **View all app transactions**: [https://lora.algokit.io/testnet/application/755415376/transactions](https://lora.algokit.io/testnet/application/755415376/transactions)
-2. **View box storage**: Navigate to the application page → "Boxes" tab to see the current `greeting` value
-3. **View your account**: Search for your deployer address to see all sent transactions
-
-#### How It Works Under the Hood
-
-Each testnet transaction follows this flow:
-
-1. **Connect** — `AlgorandClient.from_environment()` reads `ALGOD_SERVER` from `.env.testnet` and connects to the Algonode testnet API
-2. **Load account** — `account.from_environment("DEPLOYER")` reads `DEPLOYER_MNEMONIC` and derives the signing key
+1. **Connect** — `AlgorandClient.from_environment()` reads `ALGOD_SERVER` from the loaded env file and connects to the appropriate node
+2. **Load account** — On **testnet**, `account.from_environment("DEPLOYER")` reads `DEPLOYER_MNEMONIC` and derives the signing key. On **localnet**, it auto-creates a funded wallet via KMD (no mnemonic needed)
 3. **Find app** — `factory.deploy()` looks up the existing app by name and creator, returning an app client
 4. **Build transaction** — `app_client.send.hello()` constructs an ABI-encoded app call transaction with `box_references` declaring which boxes will be accessed
-5. **Sign & submit** — The transaction is signed with the deployer's private key and submitted to the testnet algod node
-6. **Wait for confirmation** — The SDK waits for the transaction to be confirmed in a block (~3.3 seconds on testnet)
+5. **Sign & submit** — The transaction is signed with the deployer's private key and submitted to the node
+6. **Wait for confirmation** — The SDK waits for the transaction to be confirmed in a block (~4.5s on LocalNet, ~3.3s on Testnet)
 7. **Return result** — The ABI return value (`"Hello, <name>"`) is decoded and returned
 
 > **Note:** Every app call transaction that accesses box storage must include `box_references` in its parameters. This is an AVM requirement — the runtime needs to know which boxes a transaction will read or write before execution.
