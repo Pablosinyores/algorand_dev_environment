@@ -25,6 +25,8 @@ algo_dev_environment/
     │   ├── test_hello_world_unit.py          # 5 offline unit tests
     │   └── test_hello_world_integration.py   # 4 integration tests (LocalNet)
     ├── call_hello.py                  # Standalone script for additional transactions
+    ├── .env.localnet                  # LocalNet connection config (auto-generated)
+    ├── .env.testnet                   # Testnet connection config + deployer mnemonic
     └── pyproject.toml                 # Python project config & dependencies
 ```
 
@@ -166,15 +168,16 @@ poetry run python -m smart_contracts deploy   # deploy only (requires prior buil
 
 ## Making Additional Transactions
 
-Use the standalone `call_hello.py` script to call the contract without re-deploying:
+Use the standalone `call_hello.py` script to call the contract without re-deploying. Use the `--network` flag to choose between **localnet** (default) and **testnet**:
 
 ```bash
-# Default name ("John Doe")
-poetry run python call_hello.py
+# --- LocalNet (default) ---
+poetry run python call_hello.py                          # default name "John Doe"
+poetry run python call_hello.py "Alice"                  # custom name
 
-# Pass any name as an argument
-poetry run python call_hello.py "Alice"
-poetry run python call_hello.py "Bob"
+# --- Testnet ---
+poetry run python call_hello.py --network testnet        # default name "John Doe"
+poetry run python call_hello.py --network testnet "Bob"  # custom name
 ```
 
 Each run creates a new on-chain app call transaction and updates the box `greeting` with `"Hello, <name>"`.
@@ -266,6 +269,93 @@ ALGOD_SERVER=https://testnet-api.algonode.cloud \
 DEPLOYER_MNEMONIC="your mnemonic here" \
 poetry run python -m smart_contracts deploy
 ```
+
+### Making Transactions on Testnet
+
+Once the contract is deployed to testnet, you can call its `hello` method to create on-chain transactions that update box storage.
+
+#### Prerequisites
+
+1. **`.env.testnet` must be configured** with your testnet algod endpoint and deployer mnemonic:
+   ```
+   ALGOD_SERVER=https://testnet-api.algonode.cloud
+   INDEXER_SERVER=https://testnet-idx.algonode.cloud
+   DEPLOYER_MNEMONIC=your twenty five word mnemonic here
+   ```
+
+2. **Your account must be funded** with testnet ALGO. Get free testnet ALGO from the [Algorand Testnet Dispenser](https://bank.testnet.algorand.network) by entering your account address.
+
+3. **The contract must already be deployed** to testnet (see "Deploying to Testnet Yourself" above). The deploy step also funds the app account with 1 ALGO for box storage MBR.
+
+#### Option 1: Using the Deploy Script
+
+The deploy script (`smart_contracts/hello_world/deploy_config.py`) automatically makes two app call transactions after deploying. To run it against testnet, load the testnet environment:
+
+```bash
+# Load testnet env vars and deploy + transact
+set -a && source .env.testnet && set +a
+poetry run python -m smart_contracts deploy
+```
+
+This will:
+- Find or create the HelloWorld app on testnet
+- Call `hello("John Doe")` → stores `"Hello, John Doe"` in box storage
+- Call `hello("Algorand Developer")` → overwrites box with `"Hello, Algorand Developer"`
+
+Expected output:
+```
+INFO: Called hello on HelloWorld (755415376) with name=John Doe, received: Hello, John Doe
+INFO: Called hello on HelloWorld (755415376) with name=Algorand Developer, received: Hello, Algorand Developer
+```
+
+#### Option 2: Using the Standalone `call_hello.py` Script
+
+The `call_hello.py` script lets you call the contract with any name without re-deploying. Just pass `--network testnet`:
+
+```bash
+# Call with default name ("John Doe")
+poetry run python call_hello.py --network testnet
+
+# Call with a custom name
+poetry run python call_hello.py --network testnet "Alice"
+poetry run python call_hello.py --network testnet "Satoshi"
+```
+
+The script automatically loads `.env.testnet` when `--network testnet` is specified — no need to manually source env files.
+
+Each run creates a new **application call transaction** on testnet and updates the `greeting` box with `"Hello, <name>"`.
+
+Expected output:
+```
+2025-01-01 12:00:00 INFO      : Using HelloWorld app ID: 755415376
+2025-01-01 12:00:02 INFO      : Transaction successful!
+2025-01-01 12:00:02 INFO      :   Name passed:     Alice
+2025-01-01 12:00:02 INFO      :   Return value:    Hello, Alice
+2025-01-01 12:00:02 INFO      :   App ID:          755415376
+2025-01-01 12:00:02 INFO      :   Box 'greeting' now contains: Hello, Alice
+```
+
+#### Verifying Transactions on Lora
+
+After making a transaction, you can verify it on the [Lora Block Explorer](https://lora.algokit.io/):
+
+1. **View all app transactions**: [https://lora.algokit.io/testnet/application/755415376/transactions](https://lora.algokit.io/testnet/application/755415376/transactions)
+2. **View box storage**: Navigate to the application page → "Boxes" tab to see the current `greeting` value
+3. **View your account**: Search for your deployer address to see all sent transactions
+
+#### How It Works Under the Hood
+
+Each testnet transaction follows this flow:
+
+1. **Connect** — `AlgorandClient.from_environment()` reads `ALGOD_SERVER` from `.env.testnet` and connects to the Algonode testnet API
+2. **Load account** — `account.from_environment("DEPLOYER")` reads `DEPLOYER_MNEMONIC` and derives the signing key
+3. **Find app** — `factory.deploy()` looks up the existing app by name and creator, returning an app client
+4. **Build transaction** — `app_client.send.hello()` constructs an ABI-encoded app call transaction with `box_references` declaring which boxes will be accessed
+5. **Sign & submit** — The transaction is signed with the deployer's private key and submitted to the testnet algod node
+6. **Wait for confirmation** — The SDK waits for the transaction to be confirmed in a block (~3.3 seconds on testnet)
+7. **Return result** — The ABI return value (`"Hello, <name>"`) is decoded and returned
+
+> **Note:** Every app call transaction that accesses box storage must include `box_references` in its parameters. This is an AVM requirement — the runtime needs to know which boxes a transaction will read or write before execution.
 
 ## Tools Used
 

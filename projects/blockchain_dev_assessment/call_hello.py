@@ -2,15 +2,19 @@
 Standalone script to call the HelloWorld contract's hello method.
 
 Usage:
-    poetry run python call_hello.py                  # uses default name "John Doe"
-    poetry run python call_hello.py "Your Name"      # pass any name as argument
+    poetry run python call_hello.py                          # LocalNet, default name
+    poetry run python call_hello.py "Alice"                  # LocalNet, custom name
+    poetry run python call_hello.py --network testnet        # Testnet, default name
+    poetry run python call_hello.py --network testnet "Bob"  # Testnet, custom name
 
 Each run creates a new on-chain app call transaction and updates the
 "greeting" box storage with "Hello, <name>".
 """
 
-import sys
+import argparse
 import logging
+import os
+from pathlib import Path
 
 import algokit_utils
 from dotenv import load_dotenv
@@ -23,11 +27,26 @@ from smart_contracts.artifacts.hello_world.hello_world_client import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-10s: %(message)s")
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 
+def call_hello(name: str, network: str) -> None:
+    # Clear network-related env vars so stale values from a previous
+    # "source .env.testnet" don't leak into a localnet run (or vice-versa).
+    for key in ("ALGOD_SERVER", "ALGOD_PORT", "ALGOD_TOKEN",
+                "INDEXER_SERVER", "INDEXER_PORT", "INDEXER_TOKEN",
+                "DEPLOYER_MNEMONIC"):
+        os.environ.pop(key, None)
 
-def call_hello(name: str) -> None:
-    # Connect to the Algorand network (LocalNet by default via .env)
+    # Load the env file for the chosen network
+    env_file = Path(__file__).parent / f".env.{network}"
+    if env_file.exists():
+        load_dotenv(env_file, override=True)
+        logger.info(f"Loaded environment from {env_file.name}")
+    else:
+        load_dotenv(override=True)
+        logger.info(f"No .env.{network} found, using default .env")
+
+    logger.info(f"Target network: {network}")
+
     algorand = algokit_utils.AlgorandClient.from_environment()
     deployer = algorand.account.from_environment("DEPLOYER")
 
@@ -59,5 +78,10 @@ def call_hello(name: str) -> None:
 
 
 if __name__ == "__main__":
-    name = sys.argv[1] if len(sys.argv) > 1 else "John Doe"
-    call_hello(name)
+    parser = argparse.ArgumentParser(description="Call the HelloWorld contract")
+    parser.add_argument("name", nargs="?", default="John Doe", help="Name to greet (default: John Doe)")
+    parser.add_argument("--network", choices=["localnet", "testnet"], default="localnet",
+                        help="Target network (default: localnet)")
+    args = parser.parse_args()
+
+    call_hello(args.name, args.network)
