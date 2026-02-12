@@ -1,101 +1,279 @@
-# blockchain_dev_assessment
+# Blockchain Developer Assessment
 
-This project has been generated using AlgoKit. See below for default getting started instructions.
+Algorand Foundation Developer Relations - Coding Skill Assessment
 
-# Setup
+## Overview
 
-### Pre-requisites
+This project demonstrates a modified AlgoKit `HelloWorld` smart contract that:
+1. Takes a name as input and concatenates it with `"Hello, "`
+2. Stores the concatenated greeting in **box storage** on-chain
+3. Returns the greeting to the caller
 
-- [Python 3.12](https://www.python.org/downloads/) or later
-- [Docker](https://www.docker.com/) (only required for LocalNet)
+The contract is written entirely in **Python** using **Algorand Python (Puya)**, deployed to both **Algorand LocalNet** and the public **Algorand Testnet**, and called via a Python deploy script.
 
-> For interactive tour over the codebase, download [vsls-contrib.codetour](https://marketplace.visualstudio.com/items?itemName=vsls-contrib.codetour) extension for VS Code, then open the [`.codetour.json`](./.tours/getting-started-with-your-algokit-project.tour) file in code tour extension.
+## Project Structure
 
-### Initial Setup
+```
+algo_dev_environment/
+└── projects/blockchain_dev_assessment/
+    ├── smart_contracts/
+    │   ├── __main__.py                # Build & deploy orchestrator
+    │   └── hello_world/
+    │       ├── contract.py            # Smart contract (Algorand Python / Puya)
+    │       └── deploy_config.py       # Deploy + call script
+    ├── tests/
+    │   ├── test_hello_world_unit.py          # 5 offline unit tests
+    │   └── test_hello_world_integration.py   # 4 integration tests (LocalNet)
+    ├── call_hello.py                  # Standalone script for additional transactions
+    └── pyproject.toml                 # Python project config & dependencies
+```
 
-#### 1. Clone the Repository
-Start by cloning this repository to your local machine.
+## Smart Contract Changes
 
-#### 2. Install Pre-requisites
-Ensure the following pre-requisites are installed and properly configured:
+### `contract.py`
 
-- **Docker**: Required for running a local Algorand network. [Install Docker](https://www.docker.com/).
-- **AlgoKit CLI**: Essential for project setup and operations. Install the latest version from [AlgoKit CLI Installation Guide](https://github.com/algorandfoundation/algokit-cli#install). Verify installation with `algokit --version`, expecting `2.0.0` or later.
+```python
+from algopy import ARC4Contract, Box, String
+from algopy.arc4 import abimethod
 
-#### 3. Bootstrap Your Local Environment
-Run the following commands within the project folder:
+class HelloWorld(ARC4Contract):
+    def __init__(self) -> None:
+        self.greeting = Box(String, key=b"greeting")
 
-- **Install Poetry**: Required for Python dependency management. [Installation Guide](https://python-poetry.org/docs/#installation). Verify with `poetry -V` to see version `1.2`+.
-- **Setup Project**: Execute `algokit project bootstrap all` to install dependencies and setup a Python virtual environment in `.venv`.
-- **Configure environment**: Execute `algokit generate env-file -a target_network localnet` to create a `.env.localnet` file with default configuration for `localnet`.
-- **Start LocalNet**: Use `algokit localnet start` to initiate a local Algorand network.
+    @abimethod()
+    def hello(self, name: String) -> String:
+        greeting = "Hello, " + name
+        self.greeting.value = greeting
+        return greeting
+```
 
-### Development Workflow
+**What changed from the starter template:**
+- Added `Box` import from `algopy`
+- Added `__init__` constructor that declares a box storage slot with key `"greeting"`
+- Modified the `hello` method to store the concatenated phrase `"Hello, <name>"` in box storage before returning it
 
-#### Terminal
-Directly manage and interact with your project using AlgoKit commands:
+**Why box storage?**
+- Box storage provides up to 32KB per box of on-chain data associated with the contract
+- Data persists after the transaction and is publicly readable via block explorers like Lora
+- The app account is funded with 1 ALGO to cover the Minimum Balance Requirement (MBR) for box storage
 
-1. **Build Contracts**: `algokit project run build` compiles all smart contracts. You can also specify a specific contract by passing the name of the contract folder as an extra argument.
-For example: `algokit project run build -- hello_world` will only build the `hello_world` contract.
-2. **Deploy**: Use `algokit project deploy localnet` to deploy contracts to the local network. You can also specify a specific contract by passing the name of the contract folder as an extra argument.
-For example: `algokit project deploy localnet -- hello_world` will only deploy the `hello_world` contract.
+### `deploy_config.py`
 
-#### VS Code 
-For a seamless experience with breakpoint debugging and other features:
+**What changed:**
+- Changed the `name` parameter from `"world"` to `"John Doe"` (and a second call with `"Algorand Developer"`)
+- Added `box_references` to the transaction parameters — this is required by the AVM to declare which boxes the transaction will access
 
-1. **Open Project**: In VS Code, open the repository root.
-2. **Install Extensions**: Follow prompts to install recommended extensions.
-3. **Debugging**:
-   - Use `F5` to start debugging.
-   - **Windows Users**: Select the Python interpreter at `./.venv/Scripts/python.exe` via `Ctrl/Cmd + Shift + P` > `Python: Select Interpreter` before the first run.
+```python
+response = app_client.send.hello(
+    args=HelloArgs(name=name),
+    params=algokit_utils.CommonAppCallParams(
+        box_references=[algokit_utils.BoxReference(app_id=0, name=b"greeting")],
+    ),
+)
+```
 
-#### JetBrains IDEs
-While primarily optimized for VS Code, JetBrains IDEs are supported:
+`app_id=0` means "this contract" and `name=b"greeting"` matches the box key declared in the contract.
 
-1. **Open Project**: In your JetBrains IDE, open the repository root.
-2. **Automatic Setup**: The IDE should configure the Python interpreter and virtual environment.
-3. **Debugging**: Use `Shift+F10` or `Ctrl+R` to start debugging. Note: Windows users may encounter issues with pre-launch tasks due to a known bug. See [JetBrains forums](https://youtrack.jetbrains.com/issue/IDEA-277486/Shell-script-configuration-cannot-run-as-before-launch-task) for workarounds.
+## Prerequisites
 
-## AlgoKit Workspaces and Project Management
-This project supports both standalone and monorepo setups through AlgoKit workspaces. Leverage [`algokit project run`](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/features/project/run.md) commands for efficient monorepo project orchestration and management across multiple projects within a workspace.
+- [Python 3.12+](https://www.python.org/downloads/)
+- [Docker](https://www.docker.com/) (required for LocalNet)
+- [pipx](https://pipx.pypa.io/stable/installation/) (for installing CLI tools)
+- [AlgoKit CLI](https://github.com/algorandfoundation/algokit-cli#install) v2.0.0+
+- [Poetry](https://python-poetry.org/docs/#installation) v1.2+
 
-## AlgoKit Generators
+## Environment & Setup
 
-This template provides a set of [algokit generators](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/features/generate.md) that allow you to further modify the project instantiated from the template to fit your needs, as well as giving you a base to build your own extensions to invoke via the `algokit generate` command.
+### 1. Install CLI Tools
 
-### Generate Smart Contract 
+```bash
+# Install AlgoKit CLI and Poetry via pipx
+pipx install algokit
+pipx install poetry
 
-By default the template creates a single `HelloWorld` contract under hello_world folder in the `smart_contracts` directory. To add a new contract:
+# Verify installations
+algokit --version    # should show v2.0.0 or later
+poetry --version     # should show v1.2 or later
+```
 
-1. From the root of the project (`../`) execute `algokit generate smart-contract`. This will create a new starter smart contract and deployment configuration file under `{your_contract_name}` subfolder in the `smart_contracts` directory.
-2. Each contract potentially has different creation parameters and deployment steps. Hence, you need to define your deployment logic in `deploy_config.py`file.
-3. `config.py` file will automatically build all contracts in the `smart_contracts` directory. If you want to build specific contracts manually, modify the default code provided by the template in `config.py` file.
+### 2. Clone and Enter the Project
 
-> Please note, above is just a suggested convention tailored for the base configuration and structure of this template. The default code supplied by the template in `config.py` and `index.ts` (if using ts clients) files are tailored for the suggested convention. You are free to modify the structure and naming conventions as you see fit.
+```bash
+git clone <repo-url>
+cd blockchain_dev_assessment/projects/blockchain_dev_assessment
+```
 
-### Generate '.env' files
+### 3. Start Algorand LocalNet
 
-By default the template instance does not contain any env files. Using [`algokit project deploy`](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/features/project/deploy.md) against `localnet` | `testnet` | `mainnet` will use default values for `algod` and `indexer` unless overwritten via `.env` or `.env.{target_network}`. 
+LocalNet runs a private Algorand network inside Docker containers (algod, indexer, conduit).
 
-To generate a new `.env` or `.env.{target_network}` file, run `algokit generate env-file`
+```bash
+algokit localnet start
+algokit localnet status   # verify it's running
+```
 
-### Debugging Smart Contracts
+### 4. Generate the LocalNet Environment File
 
-This project is optimized to work with AlgoKit AVM Debugger extension. To activate it:
-Refer to the commented header in the `__main__.py` file in the `smart_contracts` folder.
+This creates a `.env.localnet` file with the algod/indexer connection details for LocalNet.
 
-If you have opted in to include VSCode launch configurations in your project, you can also use the `Debug TEAL via AlgoKit AVM Debugger` launch configuration to interactively select an available trace file and launch the debug session for your smart contract.
+```bash
+algokit generate env-file -a target_network localnet
+```
 
-For information on using and setting up the `AlgoKit AVM Debugger` VSCode extension refer [here](https://github.com/algorandfoundation/algokit-avm-vscode-debugger). To install the extension from the VSCode Marketplace, use the following link: [AlgoKit AVM Debugger extension](https://marketplace.visualstudio.com/items?itemName=algorandfoundation.algokit-avm-vscode-debugger).
+The generated `.env.localnet` contains:
+```
+ALGOD_TOKEN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ALGOD_SERVER=http://localhost
+ALGOD_PORT=4001
+INDEXER_TOKEN=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+INDEXER_SERVER=http://localhost
+INDEXER_PORT=8980
+```
 
-# Tools
+> The deploy script auto-loads this via `python-dotenv`. No manual edits needed for LocalNet.
 
-This project makes use of Algorand Python to build Algorand smart contracts. The following tools are in use:
+### 5. Install Python Dependencies
 
-- [Algorand](https://www.algorand.com/) - Layer 1 Blockchain; [Developer portal](https://dev.algorand.co/), [Why Algorand?](https://dev.algorand.co/getting-started/why-algorand/)
-- [AlgoKit](https://github.com/algorandfoundation/algokit-cli) - One-stop shop tool for developers building on the Algorand network; [docs](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/algokit.md), [intro tutorial](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/tutorials/intro.md)
-- [Algorand Python](https://github.com/algorandfoundation/puya) - A semantically and syntactically compatible, typed Python language that works with standard Python tooling and allows you to express smart contracts (apps) and smart signatures (logic signatures) for deployment on the Algorand Virtual Machine (AVM); [docs](https://github.com/algorandfoundation/puya), [examples](https://github.com/algorandfoundation/puya/tree/main/examples)
-- [AlgoKit Utils](https://github.com/algorandfoundation/algokit-utils-py) - A set of core Algorand utilities that make it easier to build solutions on Algorand.
-- [Poetry](https://python-poetry.org/): Python packaging and dependency management.
-It has also been configured to have a productive dev experience out of the box in [VS Code](https://code.visualstudio.com/), see the [.vscode](./.vscode) folder.
+```bash
+poetry install
+```
 
+This installs all dependencies into a local `.venv/` virtual environment:
+- `algorand-python` — Smart contract framework (Puya)
+- `algokit-utils` — Typed client & deployment utilities
+- `puyapy` — Compiler (Python to TEAL)
+- `algokit-client-generator` — Generates typed Python clients from ARC-56 specs
+
+### 6. Build and Deploy
+
+```bash
+# Build (compile contract + generate typed client) AND deploy in one step
+poetry run python -m smart_contracts all
+```
+
+Expected output:
+```
+INFO: Deploying app hello_world
+INFO: Called hello on HelloWorld (1002) with name=John Doe, received: Hello, John Doe
+INFO: Called hello on HelloWorld (1002) with name=Algorand Developer, received: Hello, Algorand Developer
+```
+
+You can also build and deploy separately:
+```bash
+poetry run python -m smart_contracts build    # compile only
+poetry run python -m smart_contracts deploy   # deploy only (requires prior build)
+```
+
+## Making Additional Transactions
+
+Use the standalone `call_hello.py` script to call the contract without re-deploying:
+
+```bash
+# Default name ("John Doe")
+poetry run python call_hello.py
+
+# Pass any name as an argument
+poetry run python call_hello.py "Alice"
+poetry run python call_hello.py "Bob"
+```
+
+Each run creates a new on-chain app call transaction and updates the box `greeting` with `"Hello, <name>"`.
+
+## Testing
+
+The project includes both unit tests and integration tests.
+
+### Unit Tests (offline, no network required)
+
+Uses the [`algorand-python-testing`](https://github.com/algorandfoundation/algorand-python-testing) library to test contract logic offline by emulating AVM behavior in pure Python.
+
+| Test | What it verifies |
+|---|---|
+| `test_hello_returns_greeting` | `hello("John Doe")` returns `"Hello, John Doe"` |
+| `test_hello_stores_greeting_in_box` | Box `greeting` exists and contains the value |
+| `test_hello_overwrites_box_on_second_call` | Second call replaces the box value |
+| `test_hello_with_empty_name` | Edge case: empty name |
+| `test_hello_with_long_name` | Longer names work correctly |
+
+### Integration Tests (against LocalNet)
+
+Deploys and calls the contract on a real Algorand LocalNet, then reads box storage directly from `algod` to verify on-chain state.
+
+| Test | What it verifies |
+|---|---|
+| `test_hello_returns_correct_greeting` | ABI return value on-chain |
+| `test_box_storage_contains_greeting` | Reads box from algod, decodes and checks value |
+| `test_box_is_overwritten_on_second_call` | Second call overwrites on-chain box |
+| `test_app_has_box_listed` | App's box list includes `"greeting"` |
+
+### Running Tests
+
+```bash
+# Run all 9 tests
+poetry run python -m pytest tests/ -v
+
+# Unit tests only (no network needed)
+poetry run python -m pytest tests/test_hello_world_unit.py -v
+
+# Integration tests only (requires LocalNet running)
+poetry run python -m pytest tests/test_hello_world_integration.py -v
+```
+
+## Lora Block Explorer (LocalNet)
+
+Launch Lora to inspect transactions and box storage on LocalNet:
+
+```bash
+algokit localnet explore
+```
+
+### App Call Transaction
+
+![App Call Transaction](screenshots/app-call-transaction.png)
+
+### Box Storage Data
+
+![Box Storage Data](screenshots/box-storage-data.png.png)
+
+## Testnet Deployment
+
+The contract has also been deployed to the public **Algorand Testnet**.
+
+| Detail | Value |
+|---|---|
+| **App ID** | `755415376` |
+| **Network** | Algorand Testnet |
+| **Creator** | `3UZSYSFJ2KTHPZTOX7QP5HX2UZXFXHCSUDIBLVYAIOH2KH65KWVHBJZEXM` |
+| **Box "greeting"** | `Hello, Algorand Developer` |
+
+### Lora Testnet Links
+
+- [View Application on Lora](https://lora.algokit.io/testnet/application/755415376)
+- [View Transactions on Lora](https://lora.algokit.io/testnet/application/755415376/transactions)
+
+### Deploying to Testnet Yourself
+
+```bash
+# 1. Generate testnet env file
+algokit generate env-file -a target_network testnet
+
+# 2. Add your DEPLOYER_MNEMONIC to .env.testnet
+
+# 3. Fund your account at https://bank.testnet.algorand.network
+
+# 4. Deploy
+ALGOD_SERVER=https://testnet-api.algonode.cloud \
+DEPLOYER_MNEMONIC="your mnemonic here" \
+poetry run python -m smart_contracts deploy
+```
+
+## Tools Used
+
+- [Algorand](https://www.algorand.com/) - Layer 1 Blockchain; [Developer portal](https://dev.algorand.co/)
+- [Algorand Python (Puya)](https://github.com/algorandfoundation/puya) - Smart contract language for the AVM
+- [AlgoKit CLI](https://github.com/algorandfoundation/algokit-cli) - Project scaffolding, build, deploy; [docs](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/algokit.md)
+- [AlgoKit Utils (Python)](https://github.com/algorandfoundation/algokit-utils-py) - Typed client & deployment utilities
+- [algorand-python-testing](https://github.com/algorandfoundation/algorand-python-testing) - Offline unit testing for Algorand Python contracts
+- [Poetry](https://python-poetry.org/) - Python dependency management
+- [Lora](https://lora.algokit.io/) - Block explorer for viewing transactions and storage
+- [VS Code](https://code.visualstudio.com/) - Configured with debugging and extensions; see [.vscode](./.vscode) folder

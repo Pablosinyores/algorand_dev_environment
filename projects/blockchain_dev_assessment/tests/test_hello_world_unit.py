@@ -8,7 +8,6 @@ The library emulates AVM behavior in pure Python.
 Reference: https://algorandfoundation.github.io/algorand-python-testing/
 """
 
-import pytest
 from algopy import String
 from algopy_testing import algopy_testing_context
 
