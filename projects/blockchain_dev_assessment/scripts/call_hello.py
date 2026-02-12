@@ -7,11 +7,12 @@ Usage:
     poetry run python call_hello.py --network testnet        # Testnet, default name
     poetry run python call_hello.py --network testnet "Bob"  # Testnet, custom name
 
-Each run creates a new on-chain app call transaction and updates the
-"greeting" box storage with "Hello, <name>".
+Each run creates a new on-chain app call transaction and stores
+"Hello, <name>" in a NEW box (every greeting is preserved).
 """
 
 import argparse
+import base64
 import logging
 import os
 from pathlib import Path
@@ -26,6 +27,21 @@ from smart_contracts.artifacts.hello_world.hello_world_client import (
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-10s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def get_counter(algod, app_id: int) -> int:
+    """Read the greeting counter from the app's global state."""
+    app_info = algod.application_info(app_id)
+    for kv in app_info.get("params", {}).get("global-state", []):
+        key = base64.b64decode(kv["key"]).decode()
+        if key == "counter":
+            return kv["value"]["uint"]
+    return 0
+
+
+def make_box_name(name: str, counter: int) -> bytes:
+    """Construct the box name matching the contract's key format."""
+    return name.encode() + b"_" + counter.to_bytes(8, "big")
 
 
 def call_hello(name: str, network: str) -> None:
@@ -61,12 +77,18 @@ def call_hello(name: str, network: str) -> None:
 
     logger.info(f"Using HelloWorld app ID: {app_client.app_id}")
 
-    # Call the hello method — this creates a new on-chain transaction
-    # and stores "Hello, <name>" in box storage
+    # Read current counter to construct the box name
+    algod = algorand.client.algod
+    counter = get_counter(algod, app_client.app_id)
+    box_name = make_box_name(name, counter)
+
+    logger.info(f"Creating greeting #{counter} for '{name}'")
+
+    # Call the hello method — creates a NEW box for this greeting
     response = app_client.send.hello(
         args=HelloArgs(name=name),
         params=algokit_utils.CommonAppCallParams(
-            box_references=[algokit_utils.BoxReference(app_id=0, name=b"greeting")],
+            box_references=[algokit_utils.BoxReference(app_id=0, name=box_name)],
         ),
     )
 
@@ -74,7 +96,7 @@ def call_hello(name: str, network: str) -> None:
     logger.info(f"  Name passed:     {name}")
     logger.info(f"  Return value:    {response.abi_return}")
     logger.info(f"  App ID:          {app_client.app_id}")
-    logger.info(f"  Box 'greeting' now contains: {response.abi_return}")
+    logger.info(f"  Greeting #{counter} stored in box storage")
 
 
 if __name__ == "__main__":

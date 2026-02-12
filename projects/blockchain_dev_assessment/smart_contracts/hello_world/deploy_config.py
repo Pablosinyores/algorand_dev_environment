@@ -55,8 +55,8 @@ def deploy() -> None:
             )
         )
 
-    # --- Transaction 1: Call hello with "John Doe" ---
-    name = "John Doe"
+    # --- Transaction 1: Call hello with "Nikhil" ---
+    name = "Nikhil"
     counter = get_counter(algod, app_client.app_id)
     box_name = make_box_name(name, counter)
     response = app_client.send.hello(
@@ -72,7 +72,7 @@ def deploy() -> None:
 
     # --- Transaction 2: Call hello again with a different name ---
     # Each call creates a NEW box instead of overwriting
-    name = "Algorand Developer"
+    name = "Pablosinyores"
     counter = get_counter(algod, app_client.app_id)
     box_name = make_box_name(name, counter)
     response = app_client.send.hello(

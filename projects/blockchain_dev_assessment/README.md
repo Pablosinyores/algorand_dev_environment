@@ -11,70 +11,63 @@ This project demonstrates a modified AlgoKit `HelloWorld` smart contract that:
 
 The contract is written entirely in **Python** using **Algorand Python (Puya)**, deployed to both **Algorand LocalNet** and the public **Algorand Testnet**, and called via a Python deploy script.
 
-## Project Structure
-
-```
-algo_dev_environment/
-└── projects/blockchain_dev_assessment/
-    ├── smart_contracts/
-    │   ├── __main__.py                # Build & deploy orchestrator
-    │   └── hello_world/
-    │       ├── contract.py            # Smart contract (Algorand Python / Puya)
-    │       └── deploy_config.py       # Deploy + call script
-    ├── tests/
-    │   ├── test_hello_world_unit.py          # 5 offline unit tests
-    │   └── test_hello_world_integration.py   # 4 integration tests (LocalNet)
-    ├── call_hello.py                  # Standalone script for additional transactions
-    ├── .env.localnet                  # LocalNet connection config (auto-generated)
-    ├── .env.testnet                   # Testnet connection config + deployer mnemonic
-    └── pyproject.toml                 # Python project config & dependencies
-```
-
 ## Smart Contract Changes
 
 ### `contract.py`
 
 ```python
-from algopy import ARC4Contract, Box, String
+from algopy import ARC4Contract, BoxMap, Bytes, GlobalState, String, UInt64, op
 from algopy.arc4 import abimethod
 
 class HelloWorld(ARC4Contract):
     def __init__(self) -> None:
-        self.greeting = Box(String, key=b"greeting")
+        self.greeting_counter = GlobalState(UInt64(0), key=b"counter")
+        self.greetings = BoxMap(Bytes, String, key_prefix=b"")
 
     @abimethod()
     def hello(self, name: String) -> String:
+        current_count = self.greeting_counter.value
         greeting = "Hello, " + name
-        self.greeting.value = greeting
+        box_key = name.bytes + Bytes(b"_") + op.itob(current_count)
+        self.greetings[box_key] = greeting
+        self.greeting_counter.value = current_count + UInt64(1)
         return greeting
 ```
 
 **What changed from the starter template:**
-- Added `Box` import from `algopy`
-- Added `__init__` constructor that declares a box storage slot with key `"greeting"`
-- Modified the `hello` method to store the concatenated phrase `"Hello, <name>"` in box storage before returning it
+- Replaced single `Box` with `BoxMap` to store **multiple greetings** — every call creates a new box instead of overwriting
+- Added `GlobalState(UInt64)` counter that increments on each call, ensuring unique box keys
+- Box key format: `name_bytes + "_" + itob(counter)` — each greeting gets a unique key like `Alice_0`, `Alice_1`, `Bob_2`
+- The app account is funded with 2 ALGO to cover MBR for ~100 greeting boxes
 
-**Why box storage?**
-- Box storage provides up to 32KB per box of on-chain data associated with the contract
-- Data persists after the transaction and is publicly readable via block explorers like Lora
-- The app account is funded with 1 ALGO to cover the Minimum Balance Requirement (MBR) for box storage
+**Why box storage with BoxMap?**
+- `BoxMap` allows storing unlimited key-value pairs (limited only by MBR funding)
+- Each greeting is preserved permanently on-chain — no overwrites
+- Data is publicly readable via block explorers like Lora
+- The global counter ensures uniqueness even when the same name is used multiple times
 
 ### `deploy_config.py`
 
 **What changed:**
-- Changed the `name` parameter from `"world"` to `"John Doe"` (and a second call with `"Algorand Developer"`)
-- Added `box_references` to the transaction parameters — this is required by the AVM to declare which boxes the transaction will access
+- Added `get_counter()` helper to read the current counter from global state before each call
+- Added `make_box_name()` helper to construct box names matching the contract's key format
+- `box_references` are now **dynamic** — each transaction declares the specific box it will create
+- MBR funding increased from 1 ALGO to 2 ALGO to support multiple boxes
 
 ```python
+# Read current counter, construct box name, then call
+counter = get_counter(algod, app_client.app_id)
+box_name = make_box_name(name, counter)  # name.encode() + b"_" + counter.to_bytes(8, "big")
+
 response = app_client.send.hello(
     args=HelloArgs(name=name),
     params=algokit_utils.CommonAppCallParams(
-        box_references=[algokit_utils.BoxReference(app_id=0, name=b"greeting")],
+        box_references=[algokit_utils.BoxReference(app_id=0, name=box_name)],
     ),
 )
 ```
 
-`app_id=0` means "this contract" and `name=b"greeting"` matches the box key declared in the contract.
+`app_id=0` means "this contract" and `box_name` is constructed to match the key the contract will use.
 
 ## Prerequisites
 
@@ -213,8 +206,8 @@ poetry run python -m smart_contracts deploy
 Expected output:
 ```
 INFO: Deploying app hello_world
-INFO: Called hello on HelloWorld (755415376) with name=John Doe, received: Hello, John Doe
-INFO: Called hello on HelloWorld (755415376) with name=Algorand Developer, received: Hello, Algorand Developer
+INFO: Called hello on HelloWorld (755418551) with name=John Doe, received: Hello, John Doe
+INFO: Called hello on HelloWorld (755418551) with name=Algorand Developer, received: Hello, Algorand Developer
 ```
 
 ## Making Additional Transactions
@@ -233,7 +226,7 @@ poetry run python call_hello.py --network testnet        # default name "John Do
 poetry run python call_hello.py --network testnet "Bob"  # custom name
 ```
 
-Each run creates a new on-chain app call transaction and updates the box `greeting` with `"Hello, <name>"`.
+Each run creates a new on-chain app call transaction and stores `"Hello, <name>"` in a **new box** (every greeting is preserved).
 
 > **No need to manually `source` env files.** The script clears stale env vars and loads the correct `.env.<network>` file automatically, so switching between localnet and testnet is safe even in the same terminal session.
 
@@ -248,8 +241,9 @@ Uses the [`algorand-python-testing`](https://github.com/algorandfoundation/algor
 | Test | What it verifies |
 |---|---|
 | `test_hello_returns_greeting` | `hello("John Doe")` returns `"Hello, John Doe"` |
-| `test_hello_stores_greeting_in_box` | Box `greeting` exists and contains the value |
-| `test_hello_overwrites_box_on_second_call` | Second call replaces the box value |
+| `test_hello_stores_greeting_in_box` | Box with unique key exists and contains the greeting |
+| `test_hello_stores_multiple_greetings` | Multiple calls create separate boxes (no overwrite) |
+| `test_counter_increments_on_each_call` | Global counter increments after each `hello()` call |
 | `test_hello_with_empty_name` | Edge case: empty name |
 | `test_hello_with_long_name` | Longer names work correctly |
 
@@ -261,13 +255,13 @@ Deploys and calls the contract on a real Algorand LocalNet, then reads box stora
 |---|---|
 | `test_hello_returns_correct_greeting` | ABI return value on-chain |
 | `test_box_storage_contains_greeting` | Reads box from algod, decodes and checks value |
-| `test_box_is_overwritten_on_second_call` | Second call overwrites on-chain box |
-| `test_app_has_box_listed` | App's box list includes `"greeting"` |
+| `test_multiple_greetings_stored_separately` | Two calls with same name create two distinct boxes |
+| `test_app_has_multiple_boxes` | App's box list contains multiple greeting boxes |
 
 ### Running Tests
 
 ```bash
-# Run all 9 tests
+# Run all 10 tests
 poetry run python -m pytest tests/ -v
 
 # Unit tests only (no network needed)
@@ -299,15 +293,15 @@ The contract has also been deployed to the public **Algorand Testnet**.
 
 | Detail | Value |
 |---|---|
-| **App ID** | `755415376` |
+| **App ID** | `755418551` |
 | **Network** | Algorand Testnet |
 | **Creator** | `3UZSYSFJ2KTHPZTOX7QP5HX2UZXFXHCSUDIBLVYAIOH2KH65KWVHBJZEXM` |
-| **Box "greeting"** | `Hello, Algorand Developer` |
+| **App Address** | `PBAUMP42JQPARKOOJ75RGBPTTNNWYE5NOK67JXVYBQFI7KPZT2IODMMV6U` |
 
 ### Lora Testnet Links
 
-- [View Application on Lora](https://lora.algokit.io/testnet/application/755415376)
-- [View Transactions on Lora](https://lora.algokit.io/testnet/application/755415376/transactions)
+- [View Application on Lora](https://lora.algokit.io/testnet/application/755418551)
+- [View Transaction on Lora](https://lora.algokit.io/testnet/transaction/DKTUC3OVPAM3AW5H42ANRNSYIGLVCI3ZFYBEEQ33P65Y6KQGTMOA)
 
 ### Verifying Transactions on Lora
 
@@ -316,8 +310,8 @@ After making a transaction on either network, inspect it on [Lora](https://lora.
 | What | LocalNet | Testnet |
 |---|---|---|
 | **Launch explorer** | `algokit localnet explore` | Visit [lora.algokit.io/testnet](https://lora.algokit.io/testnet) |
-| **View app** | Search by App ID in Lora | [Application 755415376](https://lora.algokit.io/testnet/application/755415376) |
-| **View transactions** | App page → "Transactions" tab | [Transactions](https://lora.algokit.io/testnet/application/755415376/transactions) |
+| **View app** | Search by App ID in Lora | [Application 755418551](https://lora.algokit.io/testnet/application/755418551) |
+| **View transactions** | App page → "Transactions" tab | [Transactions](https://lora.algokit.io/testnet/application/755418551/transactions) |
 | **View box storage** | App page → "Boxes" tab | App page → "Boxes" tab |
 
 ### How Transactions Work Under the Hood
@@ -333,14 +327,3 @@ Each transaction (LocalNet or Testnet) follows this flow:
 7. **Return result** — The ABI return value (`"Hello, <name>"`) is decoded and returned
 
 > **Note:** Every app call transaction that accesses box storage must include `box_references` in its parameters. This is an AVM requirement — the runtime needs to know which boxes a transaction will read or write before execution.
-
-## Tools Used
-
-- [Algorand](https://www.algorand.com/) - Layer 1 Blockchain; [Developer portal](https://dev.algorand.co/)
-- [Algorand Python (Puya)](https://github.com/algorandfoundation/puya) - Smart contract language for the AVM
-- [AlgoKit CLI](https://github.com/algorandfoundation/algokit-cli) - Project scaffolding, build, deploy; [docs](https://github.com/algorandfoundation/algokit-cli/blob/main/docs/algokit.md)
-- [AlgoKit Utils (Python)](https://github.com/algorandfoundation/algokit-utils-py) - Typed client & deployment utilities
-- [algorand-python-testing](https://github.com/algorandfoundation/algorand-python-testing) - Offline unit testing for Algorand Python contracts
-- [Poetry](https://python-poetry.org/) - Python dependency management
-- [Lora](https://lora.algokit.io/) - Block explorer for viewing transactions and storage
-- [VS Code](https://code.visualstudio.com/) - Configured with debugging and extensions; see [.vscode](./.vscode) folder
