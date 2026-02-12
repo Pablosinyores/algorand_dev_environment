@@ -233,7 +233,7 @@ algokit localnet explore
 
 ### Box Storage Data
 
-![Box Storage Data](screenshots/box-storage-data.png.png)
+![Box Storage Data](screenshots/box-storage-data.png)
 
 ## Testnet Deployment
 
