@@ -9,7 +9,7 @@ This project demonstrates a modified AlgoKit `HelloWorld` smart contract that:
 2. Stores the concatenated greeting in **box storage** on-chain
 3. Returns the greeting to the caller
 
-The contract is deployed to **Algorand LocalNet** and called via a Python deploy script.
+The contract is deployed to both **Algorand LocalNet** and the public **Algorand Testnet**, and called via a Python deploy script.
 
 ## Project Structure
 
@@ -189,6 +189,38 @@ algokit localnet explore
 ### Box Storage Data
 
 ![Box Storage Data](screenshots/box-storage-data.png.png)
+
+## Testnet Deployment
+
+The contract has also been deployed to the public **Algorand Testnet**.
+
+| Detail | Value |
+|---|---|
+| **App ID** | `755415376` |
+| **Network** | Algorand Testnet |
+| **Creator** | `3UZSYSFJ2KTHPZTOX7QP5HX2UZXFXHCSUDIBLVYAIOH2KH65KWVHBJZEXM` |
+| **Box "greeting"** | `Hello, Algorand Developer` |
+
+### Lora Testnet Links
+
+- [View Application on Lora](https://lora.algokit.io/testnet/application/755415376)
+- [View Transactions on Lora](https://lora.algokit.io/testnet/application/755415376/transactions)
+
+### Deploying to Testnet yourself
+
+```bash
+# 1. Generate testnet env file
+algokit generate env-file -a target_network testnet
+
+# 2. Add your DEPLOYER_MNEMONIC to .env.testnet
+
+# 3. Fund your account at https://bank.testnet.algorand.network
+
+# 4. Deploy
+ALGOD_SERVER=https://testnet-api.algonode.cloud \
+DEPLOYER_MNEMONIC="your mnemonic here" \
+poetry run python -m smart_contracts deploy
+```
 
 ## Tools Used
 
