@@ -24,6 +24,7 @@ def deploy() -> None:
         on_schema_break=algokit_utils.OnSchemaBreak.AppendApp,
     )
 
+    # Fund the app account to cover box storage MBR (Minimum Balance Requirement)
     if result.operation_performed in [
         algokit_utils.OperationPerformed.Create,
         algokit_utils.OperationPerformed.Replace,
@@ -36,8 +37,28 @@ def deploy() -> None:
             )
         )
 
-    name = "world"
-    response = app_client.send.hello(args=HelloArgs(name=name))
+    # --- Transaction 1: Call hello with "John Doe" ---
+    name = "John Doe"
+    response = app_client.send.hello(
+        args=HelloArgs(name=name),
+        params=algokit_utils.CommonAppCallParams(
+            box_references=[algokit_utils.BoxReference(app_id=0, name=b"greeting")],
+        ),
+    )
+    logger.info(
+        f"Called hello on {app_client.app_name} ({app_client.app_id}) "
+        f"with name={name}, received: {response.abi_return}"
+    )
+
+    # --- Transaction 2: Call hello again with a different name ---
+    # This overwrites the box value, demonstrating that box storage is mutable
+    name = "Algorand Developer"
+    response = app_client.send.hello(
+        args=HelloArgs(name=name),
+        params=algokit_utils.CommonAppCallParams(
+            box_references=[algokit_utils.BoxReference(app_id=0, name=b"greeting")],
+        ),
+    )
     logger.info(
         f"Called hello on {app_client.app_name} ({app_client.app_id}) "
         f"with name={name}, received: {response.abi_return}"

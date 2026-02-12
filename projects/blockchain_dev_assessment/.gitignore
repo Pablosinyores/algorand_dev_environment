@@ -173,6 +173,7 @@ cython_debug/
 
 # NPM
 node_modules
+artifacts
 
 # AlgoKit
 debug_traces/
